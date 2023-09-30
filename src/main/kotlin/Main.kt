@@ -1,84 +1,162 @@
 import java.io.File
 
-class Node(val i: Int, alphabetSize: Int) {
-    private val link: Array<MutableList<Node>> = Array(alphabetSize) {_ -> mutableListOf()}
+class DFANode(val i: Int, alphabetSize: Int) {
+    private val link: Array<DFANode?> = Array(alphabetSize) {_ -> null}
 
-    fun addLink(to: Node, x: Int) {
+    fun addLink(to: DFANode, x: Int) {
+        link[x] = to
+    }
+
+    fun getNext(x: Int): DFANode? = link[x]
+}
+
+class DFA(val n: Int, val m: Int) {
+    val nodes = Array(n) { i -> DFANode(i, m) }
+    var startNode: Int? = null
+    var accNodes: MutableList<Int> = mutableListOf()
+
+    fun addLink(from: Int, to: Int, x: Int) {
+        nodes[from].addLink(nodes[to], x)
+    }
+
+    fun process(w: List<Int>): Boolean {
+        if (startNode == null)
+            return false
+
+        var v: DFANode? = nodes[startNode!!]
+        for (c in w) {
+            if (v == null) {
+                break
+            }
+            v = v.getNext(c)
+        }
+
+        return v != null && v.i in accNodes
+    }
+}
+
+fun readDFA(fileName: String): DFA {
+    val text = File(fileName).readLines()
+
+    val dfa = DFA(text[0].toInt(), text[1].toInt())
+
+    dfa.startNode = text[2].split(" ").map { it.toInt() }[0]
+    dfa.accNodes = text[3].split(" ").map { it.toInt() }.toMutableList()
+
+    for (i in 4..text.size-2) {
+        val row = text[i].split(" ").map { it.toInt() }
+        dfa.addLink(row[0], row[2], row[1])
+    }
+
+    return dfa
+}
+
+class NFANode(val i: Int, alphabetSize: Int) {
+    private val link: Array<MutableList<NFANode>> = Array(alphabetSize) {_ -> mutableListOf()}
+
+    fun addLink(to: NFANode, x: Int) {
         link[x].add(to)
     }
 
-    fun getNext(x: Int): MutableList<Node> = link[x]
+    fun getNexts(x: Int): MutableList<NFANode> = link[x]
 }
 
-fun dfa(filename: String): Boolean {
-    val text = File(filename).readLines()
+class NFA(val n: Int, val m: Int) {
+    val nodes = Array(n) { i -> NFANode(i, m) }
+    var startNodes: List<Int> = emptyList()
+    var accNodes: List<Int> = emptyList()
 
-    val n: Int = text[0].toInt()
-    val m: Int = text[1].toInt()
-
-    val node = Array(n) { i -> Node(i, m) }
-
-    val starts = text[2].split(" ").map { it.toInt() }
-    val acc = text[3].split(" ").map { it.toInt() }
-
-    for (i in 4..text.size-2) {
-        val row = text[i].split(" ").map { it.toInt() }
-        node[row[0]].addLink(node[row[2]], row[1])
+    fun addLink(from: Int, to: Int, x: Int) {
+        nodes[from].addLink(nodes[to], x)
     }
 
-    val w = text[text.size-1].split(" ").map { it.toInt() }
+    fun process(w: List<Int>): Boolean {
+        if (startNodes.isEmpty())
+            return false
 
-    var v: Node? = node[starts[0]]
-    for (c in w) {
-        if (v == null) {
-            break
+        var state = startNodes
+        for (c in w) {
+            val nextState = mutableListOf<Int>()
+
+            for (v in state) {
+                for (u in nodes[v].getNexts(c)) {
+                    if (u.i in nextState) continue
+                    nextState.add(u.i)
+                }
+            }
+
+            state = nextState
         }
-        v = v.getNext(c)[0]
-    }
 
-    return v != null && v.i in acc
+        for (v in state)
+            if (v in accNodes)
+                return true
+        return false
+    }
 }
 
-fun nfa(filename: String): Boolean {
-    val text = File(filename).readLines()
+fun readNFA(fileName: String): NFA {
+    val text = File(fileName).readLines()
 
-    val n: Int = text[0].toInt()
-    val m: Int = text[1].toInt()
+    val nfa = NFA(text[0].toInt(), text[1].toInt())
 
-    val node = Array(n) { i -> Node(i, m) }
-
-    val starts = text[2].split(" ").map { it.toInt() }
-    val acc = text[3].split(" ").map { it.toInt() }
+    nfa.startNodes = text[2].split(" ").map { it.toInt() }
+    nfa.accNodes = text[3].split(" ").map { it.toInt() }
 
     for (i in 4..text.size-2) {
         val row = text[i].split(" ").map { it.toInt() }
-        node[row[0]].addLink(node[row[2]], row[1])
+        nfa.addLink(row[0], row[2], row[1])
     }
 
-    val w = text[text.size-1].split(" ").map { it.toInt() }
+    return nfa
+}
 
-    var state = starts
-    for (c in w) {
-        val nextState = mutableListOf<Int>()
+fun readWord(fileName: String): List<Int> {
+    val text = File(fileName).readLines()
+    return text[text.size-1].split(" ").map { it.toInt() }
+}
 
-        for (v in state) {
-            for (u in node[v].getNext(c)) {
-                if (u.i in nextState) continue
-                nextState.add(u.i)
+fun transformNFAtoDFA(nfa: NFA): DFA {
+    val dfa = DFA(1 shl nfa.n, nfa.m)
+
+    for (mask in 0 until (1 shl nfa.n)) {
+        for (c in 0 until nfa.m) {
+            var toMask = 0
+            for (i in 0 until nfa.n) {
+                if (((mask shr i) and 1) == 1) {
+                    for (to in nfa.nodes[i].getNexts(c)) {
+                        toMask = toMask or (1 shl to.i)
+                    }
+                }
+            }
+            dfa.addLink(mask, toMask, c)
+        }
+
+        for (i in 0 until nfa.n) {
+            if (((mask shr i) and 1) == 1) {
+                if (i in nfa.accNodes) {
+                    dfa.accNodes.add(mask)
+                }
             }
         }
-
-        state = nextState
     }
 
-    for (v in state) {
-        if (v in acc) {
-            return true
-        }
+    var startMask = 0
+    for (s in nfa.startNodes) {
+        startMask = startMask or (1 shl s)
     }
-    return false
+
+    dfa.startNode = startMask
+
+    return dfa
 }
 
 fun main() {
-    println(nfa("sample.txt"))
+    val fileName = "sample.txt"
+
+    val w = readWord(fileName)
+    val nfa = readNFA(fileName)
+    val dfa = transformNFAtoDFA(nfa)
+
+    println(dfa.process(w))
 }
